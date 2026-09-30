@@ -1,7 +1,7 @@
 # FlySim
 
-Interactive browser simulation of a fruit fly (*Drosophila melanogaster*) whose
-behavior is driven by a model of its whole brain.
+Interactive browser simulation of fruit flies (*Drosophila melanogaster*) whose
+behavior is driven by a model of their whole brain -- one connectome brain per fly.
 
 - **Body & physics:** [FlyGym](https://github.com/NeLy-EPFL/flygym) / NeuroMechFly on MuJoCo.
 - **Brain:** the FlyWire v783 connectome (138,639 neurons, 15M connections) as the
@@ -31,8 +31,17 @@ walking up an odor gradient (no descending neuron in the model encodes odor side
 and flight itself. Walking without odor is a user command: the model has no
 spontaneous locomotor drive.
 
-The right-hand panel is a live map of the brain: every neuron at its FlyWire
-position, colored by super-class, flashing when it spikes.
+The right-hand panel is a live map of the selected fly's brain: every neuron at
+its FlyWire position, colored by super-class, flashing when it spikes.
+
+## Several flies
+
+Each fly has its own MuJoCo simulation and its own brain (the 15M-connection
+wiring is shared in memory, the neural state is not). Physics runs on one thread
+per fly (MuJoCo releases the GIL) in 10 ms chunks; between chunks the world
+exchanges what flies share: food, balls, bumping, and vision -- a fly flying at
+another one looms on its LPLC2 neurons and can set off its escape, so one
+startled fly can scatter the group. Walking neighbors don't trigger escapes.
 
 ## Model corrections (flysim/neurons.py)
 
@@ -51,7 +60,7 @@ dt = 0.1 ms, r = 0.998 with rates ~10% high at the dt = 0.5 ms used live.
 
 ```sh
 uv sync
-uv run python -m flysim.server            # add --no-brain for physics only
+uv run python -m flysim.server            # --flies N (default 3), --no-brain for physics only
 ```
 
 Then open http://localhost:8000. Data files go in `data/` (not versioned): from
@@ -67,7 +76,8 @@ Then open http://localhost:8000. Data files go in `data/` (not versioned): from
 | `flysim/connectome.py` | Loads the connectome (cached as .npz) |
 | `flysim/neurons.py` | Named neuron groups from annotations, sign corrections |
 | `flysim/brain_link.py` | Brain thread, sensory drive in, firing rates out |
-| `flysim/world.py` | Fly + arena, senses, brain → behavior, push/items/threat |
+| `flysim/fly.py` | One fly: own physics, senses, brain → behavior, flight, grooming |
+| `flysim/world.py` | Shared world: flies, food, balls, bumping, parallel stepping |
 | `flysim/locomotion.py` | Vectorized CPG walking controller |
 | `flysim/export.py` | Serializes MuJoCo geoms/poses for the browser |
 | `flysim/server.py` | Physics thread + FastAPI/WebSocket streaming |
@@ -79,5 +89,5 @@ Then open http://localhost:8000. Data files go in `data/` (not versioned): from
 1. ✅ Sandbox: one physical fly, walking, push it with the mouse
 2. ✅ Brain: FlyWire connectome driving feeding, escape, turning, grooming
 3. ✅ Live brain map; odor search, food consumption, throwing, flight (scripted)
-4. Several flies interacting
+4. ✅ Several flies interacting (shared food, startle cascades)
 5. Courtship and (scripted) life cycle

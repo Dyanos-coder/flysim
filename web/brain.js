@@ -185,6 +185,13 @@ export class BrainView {
       .join("");
   }
 
+  /** Forget the current glow (e.g. when another fly's brain is shown). */
+  clearActivity() {
+    if (!this.ready) return;
+    this.activity.fill(0);
+    this.activityAttr.needsUpdate = true;
+  }
+
   /** Indices of neurons that just spiked. */
   spikes(indices) {
     if (!this.ready) return;

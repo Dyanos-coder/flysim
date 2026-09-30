@@ -7,8 +7,8 @@
 //       1 = pose:   float32 [time, realtime_factor, n_projectiles,
 //                   n_geoms * 12 (xpos[3] + xmat[9]), n_projectiles * 4 (x, y, z, r)]
 //       2 = spikes: uint32 indices of neurons that spiked since the last message
-//   client -> server, JSON  {type: "push" | "walk" | "reset" | "item" | "clear_items" |
-//                            "threat" | "throw" | "take_off", ...}
+//   client -> server, JSON  {type: "select" | "push" | "walk" | "reset" | "item" |
+//                            "clear_items" | "threat" | "throw" | "take_off", ...}
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -151,7 +151,9 @@ function flyMaterial(name) {
 
 // Per-geom scene objects, indexed like the server's geom list.
 let geomObjects = [];
-let flyRootGeom = -1;
+let flyRootGeom = -1; // thorax geom of the selected fly, followed by the camera
+let followGeoms = []; // thorax geom of every fly
+let selectedFly = 0;
 const geomToBody = new Map();
 
 function buildScene(init) {
@@ -185,12 +187,14 @@ function buildScene(init) {
     obj.receiveShadow = true;
     obj.userData.geomIndex = i;
     obj.userData.body = g.body;
+    obj.userData.fly = g.fly;
     scene.add(obj);
     geomObjects.push(obj);
     geomToBody.set(i, g.body);
   });
 
-  flyRootGeom = init.follow_geom ?? -1;
+  followGeoms = init.follow_geoms || [];
+  setSelected(init.selected ?? 0);
 }
 
 const tmpMatrix = new THREE.Matrix4();
@@ -338,8 +342,47 @@ function senseLabel(group) {
   return "toucher";
 }
 
+// ---------------------------------------------------------------- fly selection
+
+const FLY_ICONS = { feeding: "🍬", grooming: "🧹", flying: "🪽", escaping: "💨", seeking_odor: "👃" };
+
+// A soft ring on the ground under the selected fly.
+const selectionRing = new THREE.Mesh(
+  new THREE.RingGeometry(1.9, 2.2, 48),
+  new THREE.MeshBasicMaterial({ color: 0xf2b33d, transparent: true, opacity: 0.55, depthWrite: false }),
+);
+selectionRing.position.z = 0.02;
+scene.add(selectionRing);
+
+function setSelected(i) {
+  if (i !== selectedFly) brain.clearActivity();
+  selectedFly = i;
+  flyRootGeom = followGeoms[i] ?? -1;
+}
+
+function selectFly(i) {
+  setSelected(i);
+  send({ type: "select", fly: i });
+}
+
+function renderFlyList(flies) {
+  const root = $("fly-list");
+  if (root.children.length !== flies.length) {
+    root.innerHTML = flies.map((_, i) => `<button data-fly="${i}"></button>`).join("");
+    root.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => selectFly(+b.dataset.fly)));
+  }
+  flies.forEach((f, i) => {
+    const b = root.children[i];
+    const icons = Object.entries(FLY_ICONS).filter(([k]) => f.behavior[k]).map(([, v]) => v).join("");
+    b.textContent = `Mouche ${i + 1}${icons ? " " + icons : f.walking ? " 🚶" : ""}`;
+    b.classList.toggle("active", i === selectedFly);
+  });
+}
+
 function applyStatus(st) {
   syncItems(st.items || []);
+  if (st.selected !== undefined && st.selected !== selectedFly) setSelected(st.selected);
+  if (st.flies) renderFlyList(st.flies);
   setWalking(st.walking);
   const chips = Object.entries(BEHAVIOR_LABELS)
     .filter(([k]) => st.behavior && st.behavior[k])
@@ -483,6 +526,21 @@ function pointerToNdc(ev) {
 }
 
 const groundPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+let clickStart = null;
+
+renderer.domElement.addEventListener("pointerdown", (ev) => {
+  if (tool === "orbit") clickStart = [ev.clientX, ev.clientY];
+});
+renderer.domElement.addEventListener("pointerup", (ev) => {
+  if (tool !== "orbit" || !clickStart) return;
+  const moved = Math.hypot(ev.clientX - clickStart[0], ev.clientY - clickStart[1]);
+  clickStart = null;
+  if (moved > 4) return;
+  pointerToNdc(ev);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(geomObjects.filter((o) => o && o.userData.fly >= 0));
+  if (hits.length) selectFly(hits[0].object.userData.fly);
+});
 
 renderer.domElement.addEventListener("pointerdown", (ev) => {
   if (tool === "throw") {
@@ -606,6 +664,12 @@ function animate(now) {
     camera.position.add(delta);
     sun.position.set(followPos.x - 10, followPos.y - 6, 20);
     sun.target.position.copy(followPos);
+  }
+  if (flyRootGeom >= 0 && geomObjects[flyRootGeom]) {
+    const p = new THREE.Vector3().setFromMatrixPosition(geomObjects[flyRootGeom].matrix);
+    selectionRing.visible = p.z < 3; // hide while flying
+    selectionRing.position.x = p.x;
+    selectionRing.position.y = p.y;
   }
 
   updateGrab(now);

@@ -54,9 +54,11 @@ def _feeding_mns(groups: neurons.NeuronGroups) -> np.ndarray:
     return mns[np.isin(groups.cell_type[mns], ["CB0911", "CB0871"])]
 
 
-class BrainLink(threading.Thread):
+class BrainModel:
+    """The wiring, loaded once and shared by every fly's brain: connectome with
+    corrections, named neuron groups, and a template Brain to clone."""
+
     def __init__(self):
-        super().__init__(daemon=True)
         t0 = time.perf_counter()
         self.connectome = connectome.load()
         self.groups = neurons.load(self.connectome)
@@ -65,34 +67,14 @@ class BrainLink(threading.Thread):
         self.groups.by_name["grooming_dns"] = _grooming_dns(self.groups)
         self.groups.by_name["feeding_mns"] = _feeding_mns(self.groups)
         c = self.connectome
-        self.brain = Brain(c.n_neurons, c.pre, c.post, c.signed_counts)
-        self.brain.run(CHUNK_MS)  # JIT warm-up
-        self.brain.reset()
+        self.template = Brain(c.n_neurons, c.pre, c.post, c.signed_counts)
+        self.template.run(CHUNK_MS)  # JIT warm-up
         # Loading leaves ~200k long-lived Python objects (annotation strings,
         # lookups). Without this, every garbage collection walks them all and
         # the physics loop, which allocates small arrays each step, runs ~2x slower.
         gc.collect()
         gc.freeze()
         self.load_seconds = time.perf_counter() - t0
-
-        self._lock = threading.Lock()
-        self._drive: dict[str, float] = {}
-        self._drive_changed = True
-        self.rates = {name: 0.0 for name in READOUTS}
-        self.spike_counts = np.zeros(c.n_neurons, dtype=np.int32)  # last chunk
-        self.n_active = 0
-        self.brain_time_ms = 0.0
-        self.target_time_ms = 0.0
-        # Wall-clock seconds the brain needs per simulated second (EMA).
-        self.load = 0.0
-        self._wake = threading.Event()
-        self._reset_requested = False
-        # (sequence number, indices of neurons that spiked) per chunk, for the
-        # live brain map; each viewer keeps its own read position.
-        self._spike_log: collections.deque = collections.deque(maxlen=200)
-        self._spike_seq = 0
-
-    # ------------------------------------------------------------ brain map
 
     # FlyWire coordinates are voxels of 4 x 4 x 40 nm.
     VOXEL_NM = np.array([4.0, 4.0, 40.0])
@@ -121,6 +103,36 @@ class BrainLink(threading.Thread):
         for sense in ("sugar", "bitter", "looming", "touch", "head_bristle", "odor_vinegar"):
             key[f"in_{sense}"] = self.groups[sense].tolist()
         return {"classes": self.SUPER_CLASSES, "groups": key}
+
+
+class BrainLink(threading.Thread):
+    """One fly's brain: its own state and thread, wiring shared via BrainModel."""
+
+    def __init__(self, model: BrainModel, seed: int = 0):
+        super().__init__(daemon=True)
+        self.model = model
+        self.groups = model.groups
+        self.brain = model.template.clone(seed)
+        c = model.connectome
+
+        self._lock = threading.Lock()
+        self._drive: dict[str, float] = {}
+        self._drive_changed = True
+        self.rates = {name: 0.0 for name in READOUTS}
+        self.spike_counts = np.zeros(c.n_neurons, dtype=np.int32)  # last chunk
+        self.n_active = 0
+        self.brain_time_ms = 0.0
+        self.target_time_ms = 0.0
+        # Wall-clock seconds the brain needs per simulated second (EMA).
+        self.load = 0.0
+        self._wake = threading.Event()
+        self._reset_requested = False
+        # (sequence number, indices of neurons that spiked) per chunk, for the
+        # live brain map; each viewer keeps its own read position.
+        self._spike_log: collections.deque = collections.deque(maxlen=200)
+        self._spike_seq = 0
+
+    # ------------------------------------------------------------ brain map
 
     def spikes_since(self, seq: int) -> tuple[int, np.ndarray]:
         """Neurons that spiked in chunks after `seq`; returns (new seq, indices)."""

@@ -14,7 +14,8 @@ Differences from their Brian2 code, for speed:
 
 Validation (scripts/validate_brain.py, Shiu's sugar experiment on FlyWire v630,
 against a fresh run of their Brian2 model): at dt = 0.1 ms per-neuron rates match
-with r = 0.999 and slope 1.01; at dt = 0.5 ms r = 0.998 with rates ~10% high.
+with r = 0.999 and slope 1.01; at dt = 0.5 ms (REST_EPS 0.3) r = 0.996 with
+rates ~7% high.
 """
 
 import math
@@ -34,9 +35,10 @@ POISSON_WEIGHT = 250 * W_SYN  # mV; each input spike reliably triggers a spike
 
 DEFAULT_DT = 0.5  # ms
 # Membrane/current values below this (mV) are treated as rest. Far below the
-# 7 mV spike threshold, but lets quiet neurons leave the active list quickly.
-# Rates vs Brian2 are unchanged from 0.01 to 0.2 (r = 0.997-0.998).
-REST_EPS = 0.1
+# 7 mV spike threshold, but lets quiet neurons leave the active list quickly
+# (with odor input ~20k neurons hover just above rest). Rates vs Brian2:
+# r = 0.998 at 0.1 mV, 0.996 at 0.3 mV, 0.978 at 0.5 mV.
+REST_EPS = 0.3
 
 
 @numba.njit(nogil=True, cache=True)
@@ -168,6 +170,19 @@ class Brain:
         self._rng_seed = 0
         self.reset()
         self.set_stimulus({})
+
+    def clone(self, seed: int) -> "Brain":
+        """Another brain with the same wiring (shared, read-only arrays) and its
+        own fresh state -- for several flies without reloading the connectome."""
+        other = object.__new__(Brain)
+        other.__dict__.update(self.__dict__)
+        other._ref_steps = self._ref_steps.copy()
+        other._ring = np.zeros_like(self._ring)
+        other._ring_len = np.zeros_like(self._ring_len)
+        other._rng_seed = seed
+        other.reset()
+        other.set_stimulus({})
+        return other
 
     def reset(self):
         self.u = np.zeros(self.n)
