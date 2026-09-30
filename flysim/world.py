@@ -119,6 +119,8 @@ class World:
         self.projectiles = []
         for fly in self.flies:
             fly.reset()
+            if fly.brain is not None:
+                fly.brain.sync_clock(self.time)
 
     # ------------------------------------------------------------ items and balls
 

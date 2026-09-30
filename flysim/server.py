@@ -1,6 +1,6 @@
 """FlySim server: runs the world in a background thread and streams it to browsers.
 
-Run with:  uv run python -m flysim.server  [--flies N] [--no-brain]
+Run with:  uv run python -m flysim.server  [--flies N] [--no-brain] [--cpu-brain]
 
 Flies can also be added at runtime from the UI (up to world.MAX_FLIES).
 """
@@ -18,6 +18,7 @@ import uvicorn
 from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
+from flysim.brain_gpu import GpuBrainLink
 from flysim.brain_link import BrainLink, BrainModel
 from flysim.export import frame_bytes, scene_description, spikes_bytes, visible_geoms
 from flysim.fly import Fly
@@ -33,25 +34,41 @@ STEP_BUDGET_S = 0.03
 
 
 class Simulation(threading.Thread):
-    def __init__(self, n_flies: int, with_brain: bool):
+    def __init__(self, n_flies: int, with_brain: bool, gpu: bool = True):
         super().__init__(daemon=True)
         self.brain_model = None
+        self.gpu_engine = None
         brains = None
         if with_brain:
             print("Loading the FlyWire brain (139k neurons, 15M connections)...")
             self.brain_model = BrainModel()
             print(f"  ready in {self.brain_model.load_seconds:.0f} s")
-            brains = [BrainLink(self.brain_model, seed=i) for i in range(n_flies)]
+            if gpu:
+                self.gpu_engine = _gpu_engine(self.brain_model)
+            brains = [self._new_brain(seed=i) for i in range(n_flies)]
             for b in brains:
                 b.start()
         self.world = World(n_flies=n_flies, brains=brains)
         self._rebuild_parts()
         self.building = False  # a fly is being added in the background
         self.selected = 0
+        self._watch_selected()
         self.commands: queue.Queue = queue.Queue()
         self.lock = threading.Lock()
         self.rtf = 0.0
         self.latest_frame = self._frame()
+
+    def _new_brain(self, seed: int):
+        """One fly's brain: a slot on the GPU engine, or a CPU brain thread."""
+        if self.gpu_engine is not None:
+            return GpuBrainLink(self.gpu_engine)
+        return BrainLink(self.brain_model, seed=seed)
+
+    def _watch_selected(self):
+        """Only the selected fly's brain streams its spiking neurons (map)."""
+        for i, fly in enumerate(self.world.flies):
+            if fly.brain is not None:
+                fly.brain.watched = i == self.selected
 
     def _rebuild_parts(self):
         """Scene parts: fly 0's model brings the ground, then every fly's body.
@@ -66,7 +83,7 @@ class Simulation(threading.Thread):
         try:
             brain = None
             if self.brain_model is not None:
-                brain = BrainLink(self.brain_model, seed=len(self.world.flies))
+                brain = self._new_brain(seed=len(self.world.flies))
                 brain.start()
             fly = self.world.build_fly(brain)
             self.commands.put({"type": "_insert_fly", "fly": fly})
@@ -114,7 +131,10 @@ class Simulation(threading.Thread):
             status["brain"] = {
                 "rates": sel.brain.rates,
                 "n_active": int(sel.brain.n_active),
-                "load": sum(f.brain.load for f in w.flies if f.brain),
+                # One shared engine on the GPU; one thread per brain on the CPU.
+                "load": self.gpu_engine.load if self.gpu_engine is not None
+                else sum(f.brain.load for f in w.flies if f.brain),
+                "device": "GPU" if self.gpu_engine is not None else "CPU",
             }
         return json.dumps(status)
 
@@ -132,6 +152,7 @@ class Simulation(threading.Thread):
         sel = self.selected_fly
         if kind == "select":
             self.selected = int(np.clip(msg.get("fly", 0), 0, len(w.flies) - 1))
+            self._watch_selected()
         elif kind == "add_fly":
             if not self.building and len(w.flies) < MAX_FLIES:
                 self.building = True
@@ -141,10 +162,12 @@ class Simulation(threading.Thread):
                 w.remove_fly(sel)
                 self._rebuild_parts()
                 self.selected = min(self.selected, len(w.flies) - 1)
+                self._watch_selected()
         elif kind == "_insert_fly" and isinstance(msg.get("fly"), Fly):  # from _build_fly only
             w.insert_fly(msg["fly"])
             self._rebuild_parts()
             self.selected = len(w.flies) - 1
+            self._watch_selected()
             self.building = False
         elif kind == "reset":
             w.reset()
@@ -206,17 +229,32 @@ class Simulation(threading.Thread):
                 time.sleep(spare)
 
 
+def _gpu_engine(model):
+    """The shared GPU brain engine, or None (with the reason) if unavailable."""
+    try:
+        from flysim.brain_gpu import GpuBrainEngine
+
+        engine = GpuBrainEngine(model, capacity=MAX_FLIES)  # compiles kernels, records the graph
+        print("  brains on the GPU")
+        return engine
+    except Exception as e:  # no CuPy, no NVIDIA GPU, driver issue...
+        print(f"  GPU unavailable ({type(e).__name__}: {e}); brains on the CPU")
+        return None
+
+
 def _parse_args():
     parser = argparse.ArgumentParser(description="FlySim server")
     parser.add_argument("--flies", type=int, default=1, help="flies at start (default 1; more can be added from the UI)")
     parser.add_argument("--no-brain", action="store_true", help="physics only, no connectome")
+    parser.add_argument("--cpu-brain", action="store_true", help="run brains on the CPU even if a GPU is available")
     args, _ = parser.parse_known_args()
     return args
 
 
 disable_windows_power_throttling()
 _args = _parse_args()
-sim = Simulation(n_flies=int(np.clip(_args.flies, 1, MAX_FLIES)), with_brain=not _args.no_brain)
+sim = Simulation(n_flies=int(np.clip(_args.flies, 1, MAX_FLIES)), with_brain=not _args.no_brain,
+                 gpu=not _args.cpu_brain)
 app = FastAPI()
 
 

@@ -402,7 +402,7 @@ function applyStatus(st) {
   if (!st.brain) return;
   $("brain-section").hidden = false;
   $("brain-meta").textContent =
-    `· ${st.brain.n_active.toLocaleString("fr-FR")} neurones actifs · charge ${st.brain.load.toFixed(2)}`;
+    `· ${st.brain.n_active.toLocaleString("fr-FR")} neurones actifs · ${st.brain.device || ""} ${st.brain.load.toFixed(2)}`;
   for (const row of $("neurons").children) {
     const key = JSON.parse(row.dataset.key);
     const rates = st.brain.rates;

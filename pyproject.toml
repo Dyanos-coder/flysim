@@ -5,6 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "cuda-toolkit[cudart,nvrtc]==13.*",
+    "cupy-cuda13x>=14.2.0",
     "fastapi>=0.142.2",
     "flygym>=2.1.0",
     "pyarrow>=25.0.1",

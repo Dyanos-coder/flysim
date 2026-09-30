@@ -142,6 +142,7 @@ class BrainLink(threading.Thread):
         self._wake = threading.Event()
         self._reset_requested = False
         self._stopped = False
+        self.watched = False  # the CPU brain always logs its spikes
         # (sequence number, indices of neurons that spiked) per chunk, for the
         # live brain map; each viewer keeps its own read position.
         self._spike_log: collections.deque = collections.deque(maxlen=200)

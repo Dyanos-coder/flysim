@@ -39,6 +39,16 @@ odor comes from, so the fly finds food by exploring.
 The right-hand panel is a live map of the selected fly's brain: every neuron at
 its FlyWire position, colored by super-class, flashing when it spikes.
 
+## GPU brains
+
+With an NVIDIA GPU and CuPy (`cupy-cuda13x` plus the pip CUDA runtime/NVRTC, no
+CUDA toolkit needed), all brains run together on the GPU (`flysim/brain_gpu.py`):
+one copy of the wiring, one row of state per fly, two CUDA kernels per 0.5 ms
+step recorded as a CUDA graph. It matches the CPU brain (r = 0.998 on the sugar
+test, `scripts/validate_gpu.py`) and runs 6 always-active brains at ~1.4x real
+time on an RTX 3050 laptop GPU. Without a usable GPU the server falls back to
+the CPU brain. With several flies the limit is then MuJoCo physics on the CPU.
+
 ## Several flies
 
 Each fly has its own MuJoCo simulation and its own brain (the 15M-connection
@@ -67,7 +77,7 @@ dt = 0.1 ms, r = 0.998 with rates ~10% high at the dt = 0.5 ms used live.
 
 ```sh
 uv sync
-uv run python -m flysim.server            # --flies N at start (default 1), --no-brain for physics only
+uv run python -m flysim.server            # --flies N at start (default 1), --no-brain, --cpu-brain
 ```
 
 Then open http://localhost:8000. Data files go in `data/` (not versioned): from
