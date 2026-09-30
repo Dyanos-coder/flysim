@@ -38,9 +38,12 @@ CONTROL_EVERY = 5
 SENSE_EVERY = 100
 WARMUP_S = 0.05
 # Push-tool spring: pulling the grabbed point 1 mm away from the cursor produces
-# PUSH_STIFFNESS_BW times the fly's body weight.
+# PUSH_STIFFNESS_BW times the fly's body weight, capped at PUSH_MAX_BW and damped
+# (seconds of the grabbed point's velocity). Stronger pulls accelerate the body
+# faster than the tiny leg segments can follow and the physics diverges.
 PUSH_STIFFNESS_BW = 6.0
-PUSH_MAX_BW = 15.0
+PUSH_MAX_BW = 4.0
+PUSH_DAMPING_S = 0.1
 
 # --- food and smell
 DROP_RADIUS = 0.8  # mm, sugar/bitter drops on the floor
@@ -196,8 +199,32 @@ class World:
         self.projectiles = []
         self.data.xfrc_applied[:] = 0
         self.sim.warmup(WARMUP_S)
+        self._snapshot()
+        self.recoveries = 0
         if self.brain is not None:
             self.brain.reset()
+
+    def _snapshot(self):
+        d = self.data
+        self._good = (d.time, d.qpos.copy(), d.act.copy())
+
+    def _recover(self):
+        """The physics blew up (usually huge contact/adhesion forces) and MuJoCo
+        reset the whole world to its initial state, which looks like the fly
+        teleporting. Restore the last good state, at rest, and drop whatever
+        was forcing the body."""
+        t, qpos, act = self._good
+        d = self.data
+        d.time = t
+        d.qpos[:] = qpos
+        d.qvel[:] = 0.0
+        d.act[:] = act
+        d.qacc_warmstart[:] = 0.0
+        d.xfrc_applied[:] = 0.0
+        self._push = None
+        self.flight = None
+        mujoco.mj_forward(self.model, d)
+        self.recoveries += 1
 
     # ------------------------------------------------------------ interaction
 
@@ -424,6 +451,10 @@ class World:
         if self.data.time - self._landed_at < 0.5 or xmat[8] < 0.5:
             # tilt = up x world_z, with up = third column of the body frame.
             tilt = np.array([xmat[5], -xmat[2], 0.0])
+            if xmat[8] < 0.0:
+                # Upside down the cross product vanishes; roll over sideways.
+                n = np.linalg.norm(tilt)
+                tilt = tilt / n if n > 1e-3 else self._thorax_frame()[:, 0].copy()
             qv = self._free_qvel
             omega = self.data.qvel[qv + 3 : qv + 6]
             k = self._fly_mass * 4000.0
@@ -479,7 +510,9 @@ class World:
             if b["grooming"] and self.flight is None:
                 angles = self._grooming_pose(angles)
                 adhesion[[0, 3]] = False
-            if self.flight is not None:
+            if self.flight is not None or self._push is not None:
+                # Airborne, or held by the user: feet let go (pulling against
+                # full adhesion otherwise tears the leg joints apart).
                 adhesion[:] = False
             self.sim.set_actuator_inputs(FLY_NAME, ActuatorType.POSITION, angles)
             self.sim.set_leg_adhesion_states(FLY_NAME, adhesion.astype(float))
@@ -492,8 +525,13 @@ class World:
         if self.flight is not None:
             self._fly()
         self._stabilize()
+        t_before = self.data.time
         self.sim.step()
         self._steps += 1
+        if self.data.time < t_before:  # MuJoCo auto-reset after a divergence
+            self._recover()
+        elif self._steps % SENSE_EVERY == 0:
+            self._snapshot()
 
     def _grooming_pose(self, angles: np.ndarray) -> np.ndarray:
         """Front legs sweep forward over the head at ~6 Hz (scripted program)."""
@@ -514,7 +552,9 @@ class World:
         body_id, geom_id, local, target = self._push
         xmat = self.data.geom_xmat[geom_id].reshape(3, 3)
         anchor = self.data.geom_xpos[geom_id] + xmat @ local
-        force = self._push_k * (target - anchor)
+        vel = np.zeros(6)
+        mujoco.mj_objectVelocity(self.model, self.data, mujoco.mjtObj.mjOBJ_GEOM, geom_id, vel, 0)
+        force = self._push_k * (target - anchor - PUSH_DAMPING_S * vel[3:])
         norm = np.linalg.norm(force)
         if norm > self._push_max:
             force *= self._push_max / norm
