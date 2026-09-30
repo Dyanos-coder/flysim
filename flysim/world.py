@@ -206,7 +206,6 @@ class World:
         self._eat(CHUNK_S)
         self._bump()
         for fly in self.flies:
-            fly.odor_reflex()
             if fly.brain is not None:
                 fly.drive = fly.sense(CHUNK_S)
                 fly.brain.set_drive(fly.drive)
@@ -217,8 +216,6 @@ class World:
         for fly in self.flies:
             if fly.brain is not None:
                 fly.act(fly.brain.rates)
-            else:
-                fly.behavior["turn"] = fly._odor_turn
             fly.behavior["flying"] = fly.flight is not None
         list(self._pool.map(lambda f: f.run_chunk(SENSE_EVERY), self.flies))
 

@@ -210,7 +210,9 @@ export class BrainView {
     for (const { el, idx } of this.labels) {
       let s = 0;
       for (const i of idx) s += a[i];
-      el.classList.toggle("lit", s / idx.length > 0.08);
+      // With ongoing activity every group flickers a little; light a label
+      // only on a real response.
+      el.classList.toggle("lit", s / idx.length > 0.3);
     }
 
     const now = performance.now();

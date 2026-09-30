@@ -24,12 +24,17 @@ descending / motor neurons back out. These links emerge from the wiring:
 | Touch the head / body | bristle mechanosensory | DNg grooming DNs | grooming |
 | Vinegar / fruit juice nearby | vinegar-sensitive ORNs | — | (olfactory circuits light up) |
 
-The neurons decide whether and which way; the takeoff, flight and grooming movements
-are scripted motor programs (the ventral nerve cord is not in FlyWire). Two things
-are scripted reflexes outside the brain model and labeled as such in the UI:
-walking up an odor gradient (no descending neuron in the model encodes odor side)
-and flight itself. Walking without odor is a user command: the model has no
-spontaneous locomotor drive.
+Nobody tells the fly what to do. Like a real fly's, its sensory and visual
+projection neurons carry ongoing activity (`brain_link.SPONTANEOUS_HZ`); through
+the wiring it makes the walking neurons fluctuate on their own: DNp09 fires in
+bouts (forward walking), DNa02/DNa01 steer, MDN would drive backward walking.
+The fly walks, stops and turns by itself (`scripts/spontaneous.py`,
+`docs/autonomie.md`).
+
+The neurons decide whether and which way; the stepping pattern (recorded steps),
+takeoff, flight and grooming movements are animated (the ventral nerve cord is
+not in FlyWire; flight has no aerodynamics). The model doesn't encode where an
+odor comes from, so the fly finds food by exploring.
 
 The right-hand panel is a live map of the selected fly's brain: every neuron at
 its FlyWire position, colored by super-class, flashing when it spikes.

@@ -7,7 +7,7 @@
 //       1 = pose:   float32 [time, realtime_factor, n_projectiles, n_geoms,
 //                   n_geoms * 12 (xpos[3] + xmat[9]), n_projectiles * 4 (x, y, z, r)]
 //       2 = spikes: uint32 indices of neurons that spiked since the last message
-//   client -> server, JSON  {type: "select" | "add_fly" | "remove_fly" | "push" | "walk" | "reset" | "item" |
+//   client -> server, JSON  {type: "select" | "add_fly" | "remove_fly" | "push" | "reset" | "item" |
 //                            "clear_items" | "threat" | "throw" | "take_off", ...}
 
 import * as THREE from "three";
@@ -329,11 +329,11 @@ function buildNeuronPanel() {
 }
 
 const BEHAVIOR_LABELS = {
+  walking: "🚶 marche",
   feeding: "🍬 mange",
   grooming: "🧹 se nettoie",
   escaping: "💨 fuite (fibre géante)",
   flying: "🪽 vole",
-  seeking_odor: "👃 suit une odeur",
 };
 
 function senseLabel(group) {
@@ -346,7 +346,7 @@ function senseLabel(group) {
 
 // ---------------------------------------------------------------- fly selection
 
-const FLY_ICONS = { feeding: "🍬", grooming: "🧹", flying: "🪽", escaping: "💨", seeking_odor: "👃" };
+const FLY_ICONS = { feeding: "🍬", grooming: "🧹", flying: "🪽", escaping: "💨", walking: "🚶" };
 
 // A soft ring on the ground under the selected fly.
 const selectionRing = new THREE.Mesh(
@@ -376,7 +376,7 @@ function renderFlyList(flies) {
   flies.forEach((f, i) => {
     const b = root.children[i];
     const icons = Object.entries(FLY_ICONS).filter(([k]) => f.behavior[k]).map(([, v]) => v).join("");
-    b.textContent = `Mouche ${i + 1}${icons ? " " + icons : f.walking ? " 🚶" : ""}`;
+    b.textContent = `Mouche ${i + 1}${icons ? " " + icons : ""}`;
     b.classList.toggle("active", i === selectedFly);
   });
 }
@@ -390,12 +390,11 @@ function applyStatus(st) {
     ? `➕ Maximum (${maxFlies})` : "➕ Ajouter une mouche";
   if (st.selected !== undefined && st.selected !== selectedFly) setSelected(st.selected);
   if (st.flies) renderFlyList(st.flies);
-  setWalking(st.walking);
   const chips = Object.entries(BEHAVIOR_LABELS)
     .filter(([k]) => st.behavior && st.behavior[k])
     .map(([, v]) => `<span class="chip">${v}</span>`);
   const turn = st.behavior ? st.behavior.turn : 0;
-  if (Math.abs(turn) > 0.25) chips.push(`<span class="chip">${turn > 0 ? "↰ tourne à gauche" : "↱ tourne à droite"}</span>`);
+  if (Math.abs(turn) > 0.35) chips.push(`<span class="chip">${turn > 0 ? "↰ tourne à gauche" : "↱ tourne à droite"}</span>`);
   const senses = Object.keys(st.drive || {});
   if (senses.length) chips.push(`<span class="chip">sent : ${[...new Set(senses.map(senseLabel))].join(", ")}</span>`);
   $("behaviors").innerHTML = chips.join("");
@@ -465,7 +464,6 @@ function connect() {
       const msg = JSON.parse(ev.data);
       if (msg.type === "init") {
         buildScene(msg);
-        setWalking(msg.walking);
         if (msg.has_brain) {
           if (!$("neurons").children.length) buildNeuronPanel();
           if (!brainLoading) setBrainOpen(true);
@@ -489,7 +487,6 @@ function send(msg) {
 
 let tool = "orbit";
 let following = true;
-let walking = false;
 
 function setTool(t) {
   tool = t;
@@ -506,14 +503,6 @@ function setTool(t) {
 }
 document.querySelectorAll("[data-tool]").forEach((b) => b.addEventListener("click", () => setTool(b.dataset.tool)));
 
-function setWalking(w) {
-  walking = w;
-  $("btn-walk").classList.toggle("active", w);
-}
-$("btn-walk").addEventListener("click", () => {
-  setWalking(!walking);
-  send({ type: "walk", on: walking });
-});
 $("btn-follow").addEventListener("click", () => {
   following = !following;
   $("btn-follow").classList.toggle("active", following);

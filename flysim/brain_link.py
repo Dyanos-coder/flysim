@@ -23,6 +23,17 @@ MAX_LAG_MS = 40.0
 # Exponential smoothing of readout rates (time constant, ms).
 RATE_TAU_MS = 60.0
 
+# Ongoing activity. A real fly's sensory neurons and visual projection neurons
+# fire all the time; the model of Shiu et al. starts from a silent brain, which
+# never does anything on its own. With this baseline (scripts/spontaneous.py),
+# the walking descending neurons fluctuate by themselves: DNp09 fires in
+# bouts (forward walking), DNa02/DNa01 wander left and right (turning), while
+# escape, feeding and grooming neurons stay below their thresholds. Sensory
+# drive from the world adds on top (the higher rate wins per neuron).
+# Taste neurons fire very little without food; at 2 Hz the sugar ones alone
+# made the fly "feed" on nothing.
+SPONTANEOUS_HZ = {"visual_projection": 2.0, "sensory_nonvisual": 2.0, "gustatory": 0.5}
+
 READOUTS = {
     "giant_fiber_left": "giant_fiber_left",
     "giant_fiber_right": "giant_fiber_right",
@@ -115,6 +126,9 @@ class BrainLink(threading.Thread):
         self.brain = model.template.clone(seed)
         c = model.connectome
 
+        self._spontaneous = np.zeros(c.n_neurons)
+        for group, hz in SPONTANEOUS_HZ.items():
+            self._spontaneous[self.groups[group]] = hz
         self._lock = threading.Lock()
         self._drive: dict[str, float] = {}
         self._drive_changed = True
@@ -185,11 +199,11 @@ class BrainLink(threading.Thread):
                 return
             drive = dict(self._drive)
             self._drive_changed = False
-        rates: dict[int, float] = {}
+        rates = self._spontaneous.copy()
         for group, hz in drive.items():
-            for i in self.groups[group]:
-                rates[int(i)] = max(rates.get(int(i), 0.0), hz)
-        self.brain.set_stimulus(rates)
+            idx = self.groups[group]
+            rates[idx] = np.maximum(rates[idx], hz)
+        self.brain.set_stimulus_array(rates)
 
     def run(self):
         alpha = 1 - np.exp(-CHUNK_MS / RATE_TAU_MS)

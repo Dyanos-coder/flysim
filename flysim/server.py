@@ -99,11 +99,10 @@ class Simulation(threading.Thread):
             "can_add_fly": not self.building and len(w.flies) < MAX_FLIES,
             "can_remove_fly": not self.building and len(w.flies) > 1,
             "building": self.building,
-            "walking": sel.walking,
             "behavior": sel.behavior,
             "drive": sel.drive,
             "flies": [
-                {"behavior": {k: v for k, v in f.behavior.items() if v is True}, "walking": f.walking}
+                {"behavior": {k: v for k, v in f.behavior.items() if v is True}}
                 for f in w.flies
             ],
             "items": [
@@ -147,8 +146,6 @@ class Simulation(threading.Thread):
             self._rebuild_parts()
             self.selected = len(w.flies) - 1
             self.building = False
-        elif kind == "walk":
-            sel.walking = bool(msg.get("on"))
         elif kind == "reset":
             w.reset()
         elif kind == "push":

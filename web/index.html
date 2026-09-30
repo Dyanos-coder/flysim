@@ -61,7 +61,6 @@
         <button id="btn-remove-fly" title="Retirer la mouche sélectionnée">➖ Retirer</button>
       </div>
       <div class="tools">
-        <button id="btn-walk" title="Envie de marcher (le modèle de cerveau n'a pas d'activité spontanée)">🚶 Marcher</button>
         <button id="btn-follow" class="active" title="La caméra suit la mouche">🎯 Suivre</button>
         <button id="btn-reset" title="Remettre la mouche au centre">↺ Reset</button>
         <button id="btn-brain" title="Afficher la carte du cerveau">🧠 Carte</button>
@@ -79,13 +78,18 @@
       <p>Chaque mouche a un corps physique (scan micro-CT, moteur MuJoCo) et son propre
         cerveau : les 138 639 neurones et 15 millions de connexions du connectome FlyWire,
         simulés avec le modèle de Shiu et al. (<i>Nature</i> 2024).</p>
-      <p><b>Décidé par le cerveau</b> : goût sucré → motoneurones de la trompe (manger),
-        amer → refus, objet qui fonce → LPLC2 → fibre géante (fuite) et virage à l'opposé,
-        contact → neurones du toilettage.</p>
+      <p><b>Personne ne lui dit quoi faire.</b> Comme chez une vraie mouche, ses neurones
+        sensoriels et visuels ont une activité de fond permanente. Elle traverse le câblage
+        et fait fluctuer d'elle-même les neurones de la marche : DNp09 (avancer) s'active
+        par bouffées, DNa02/DNa01 (tourner) oscillent. Elle marche, s'arrête, repart,
+        change de direction.</p>
+      <p><b>Décidé par le cerveau</b> : marcher, s'arrêter, tourner ; goût sucré →
+        motoneurones de la trompe (manger), amer → refus ; objet qui fonce → LPLC2 →
+        fibre géante (fuite) et virage à l'opposé ; contact → neurones du toilettage.</p>
       <p><b>Animé par le programme</b> : le cerveau modélisé s'arrête au cou, sans la moelle
-        qui coordonne les pattes. Les gestes du vol et du toilettage sont donc animés, le vol
-        n'a pas d'aérodynamique, et la recherche d'odeur ainsi que l'envie de marcher ne
-        viennent pas du connectome.</p>
+        qui coordonne les pattes. Les pas rejouent une démarche enregistrée, les gestes du
+        vol et du toilettage sont animés, et le vol n'a pas d'aérodynamique. Elle ne sait
+        pas d'où vient une odeur : elle trouve la nourriture en explorant.</p>
     </details>
 
     <section class="stats">

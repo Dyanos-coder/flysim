@@ -46,8 +46,9 @@ def _run(
     n_steps, u, x, refractory, ref_steps, ring, ring_len, ring_head,
     active, is_active, n_active, rest_eps,
     indptr, targets, weights,
-    stim_idx, stim_prob, rng_state,
+    stim_idx, stim_ptr, stim_prob, rng_state,
     a_m, a_s, c_ms, u_th, delay_steps, poisson_w,
+    bg_prob, bg_weight,
     spike_counts,
 ):
     """Advance the network n_steps. u = v - V_REST, x = synaptic current g.
@@ -80,15 +81,34 @@ def _run(
                         n_active += 1
         ring_len[slot] = 0
 
-        # 2. External Poisson drive, straight onto the membrane.
-        for k in range(stim_idx.shape[0]):
-            if np.random.random() < stim_prob[k]:
-                i = stim_idx[k]
+        # 2. External Poisson drive, straight onto the membrane. Driven neurons
+        #    are grouped by rate (stim_ptr delimits each group in stim_idx):
+        #    draw how many of a group fire this step, then which ones. Same
+        #    statistics as one draw per neuron, at a tiny fraction of the cost
+        #    when ~30k neurons carry a low ongoing rate.
+        for c in range(stim_ptr.shape[0] - 1):
+            start = stim_ptr[c]
+            n_c = stim_ptr[c + 1] - start
+            for _k in range(np.random.binomial(n_c, stim_prob[c])):
+                i = stim_idx[start + np.random.randint(0, n_c)]
                 u[i] += poisson_w
                 if not is_active[i]:
                     is_active[i] = True
                     active[n_active] = i
                     n_active += 1
+
+        # 2b. Background synaptic noise: each neuron receives small random
+        #     excitatory events (probability bg_prob per step, bg_weight mV).
+        if bg_prob > 0.0:
+            n_events = np.random.binomial(u.shape[0], bg_prob)
+            for _k in range(n_events):
+                i = np.random.randint(0, u.shape[0])
+                if refractory[i] == 0:
+                    x[i] += bg_weight
+                    if not is_active[i]:
+                        is_active[i] = True
+                        active[n_active] = i
+                        n_active += 1
 
         # 3. Integrate active membranes; queue new spikes `delay_steps` ahead;
         #    compact the active list in place, dropping neurons back at rest.
@@ -168,6 +188,7 @@ class Brain:
         self._ring = np.zeros((n_slots, self.MAX_SPIKES_PER_STEP), dtype=np.int32)
         self._ring_len = np.zeros(n_slots, dtype=np.int64)
         self._rng_seed = 0
+        self.set_background(0.0, 0.0)
         self.reset()
         self.set_stimulus({})
 
@@ -200,15 +221,35 @@ class Brain:
         """Neurons currently away from rest (the ones the kernel integrates)."""
         return self._n_active
 
+    def set_background(self, rate_hz: float, weight_mv: float):
+        """Background synaptic noise on every neuron: random excitatory events at
+        rate_hz per neuron, each adding weight_mv to its synaptic current.
+        0 Hz (the default) is the silent brain of Shiu et al."""
+        self._bg_prob = rate_hz * self.dt / 1000.0
+        self.background_mv = float(weight_mv)
+
     def set_stimulus(self, rates_hz: dict[int, float]):
         """Poisson drive: {neuron index: rate in Hz}. Replaces the previous drive.
         As in Shiu et al., driven neurons have no refractory period."""
-        idx = np.fromiter(rates_hz.keys(), dtype=np.int64, count=len(rates_hz))
-        rates = np.fromiter(rates_hz.values(), dtype=np.float64, count=len(rates_hz))
+        rates = np.zeros(self.n)
+        if rates_hz:
+            idx = np.fromiter(rates_hz.keys(), dtype=np.int64, count=len(rates_hz))
+            rates[idx] = np.fromiter(rates_hz.values(), dtype=np.float64, count=len(rates_hz))
+        self.set_stimulus_array(rates)
+
+    def set_stimulus_array(self, rates_hz: np.ndarray):
+        """Same as set_stimulus, from a per-neuron array of rates (0 = none).
+        Rates are rounded to 0.1 Hz and neurons grouped by rate for the kernel."""
+        rates = np.round(rates_hz, 1)
+        idx = np.flatnonzero(rates > 0)
         self._ref_steps[:] = self._default_ref_steps
         self._ref_steps[idx] = 0
-        self._stim_idx = idx
-        self._stim_prob = np.clip(rates * self.dt / 1000.0, 0.0, 1.0)
+        order = np.argsort(rates[idx], kind="stable")
+        idx = idx[order]
+        values, counts = np.unique(rates[idx], return_counts=True)
+        self._stim_idx = idx.astype(np.int64)
+        self._stim_ptr = np.concatenate([[0], np.cumsum(counts)]).astype(np.int64)
+        self._stim_prob = np.clip(values * self.dt / 1000.0, 0.0, 1.0)
 
     def run(self, duration_ms: float) -> np.ndarray:
         """Advance the network; returns the spike count of every neuron."""
@@ -220,9 +261,10 @@ class Brain:
             self._ring, self._ring_len, self._ring_head,
             self._active, self._is_active, self._n_active, self.rest_eps,
             self._indptr, self._targets, self._weights,
-            self._stim_idx, self._stim_prob, self._rng_seed,
+            self._stim_idx, self._stim_ptr, self._stim_prob, self._rng_seed,
             self._a_m, self._a_s, self._c_ms, self._u_th,
             self._delay_steps, POISSON_WEIGHT,
+            self._bg_prob, self.background_mv,
             counts,
         )
         self.time_ms += n_steps * self.dt

@@ -165,6 +165,10 @@ def load(connectome: Connectome, path: Path = ANNOTATIONS) -> NeuronGroups:
         add(f"odor_{odor}", np.isin(ctype, types))
     add("looming", ctype == "LPLC2")
     add("touch", (cls == "mechanosensory") & (sub == "grooming"))
+    add("photoreceptors", (sup == "sensory") & (cls == "visual"))
+    add("visual_projection", sup == "visual_projection")
+    add("sensory_nonvisual", (sup == "sensory") & (cls != "visual") & (cls != "gustatory"))
+    add("gustatory", (sup == "sensory") & (cls == "gustatory"))
     add("head_bristle", (cls == "mechanosensory") & (sub == "head bristle"))
 
     # --- outputs

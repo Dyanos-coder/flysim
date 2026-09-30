@@ -8,12 +8,14 @@ Every SENSE period the fly:
    and turns them into behavior: escape takeoff and turning away (giant fiber,
    DNa02/DNa01), feeding arrest and proboscis extension (proboscis motor
    neurons), grooming (bristle-driven DNs).
+Walking itself is decided by the brain too: with ongoing activity
+(brain_link.SPONTANEOUS_HZ) the forward-walking neuron DNp09 fires in bouts,
+MDN would drive backward walking, and DNa02/DNa01 steer.
+
 The neurons decide *whether* and *which way*; the motor programs that carry out
-a takeoff, a flight or a grooming bout are scripted, because the brain model
+a takeoff, a flight or a grooming bout are animated, because the brain model
 stops at the neck (the ventral nerve cord that patterns movements is not in
-FlyWire). Two behaviors are scripted reflexes outside the brain model, and
-labeled as such in the UI: odor-guided walking (no descending neuron in the
-model encodes odor side) and flight itself (no flight controller).
+FlyWire), and flight has no aerodynamics.
 """
 
 from __future__ import annotations
@@ -66,8 +68,6 @@ ODOR_SIGMA = 35.0  # mm, width of the odor plume around a source
 # (fermentation volatiles activate the same vinegar-sensitive receptor neurons).
 ODOR_STRENGTH = {"vinegar": 1.0, "sugar": 0.6}
 ODOR_MAX_HZ = 100.0
-ODOR_DETECT = 0.03  # concentration that makes the fly go look for the source
-ODOR_ARRIVED_MM = 2.0
 
 # --- vision
 LOOM_GAIN = 40.0  # Hz of LPLC2 drive per rad/s of angular expansion
@@ -81,11 +81,22 @@ TOUCH_HZ = 50.0
 # --- behavior readouts (Hz, smoothed rates)
 TURN_NORM_HZ = 40.0
 TURN_GAIN = 0.6
-# DNa02 steering was validated for looming (it flips with the threat side), so
-# brain steering is applied while/just after something looms.
+# Just after something looms, the fly turns away even from standstill (DNa02
+# flips with the threat side). Otherwise steering scales with walking: the
+# ongoing DNa02/DNa01 fluctuations shouldn't spin a fly that stands still.
 LOOM_STEER_WINDOW_S = 1.0
-ODOR_TURN_GAIN = 2.0
-GIANT_FIBER_HZ = 40.0
+TURN_TAU_S = 0.3  # smoothing of the steering signal
+# Walking command from the forward-walking neuron DNp09 (Bidaye et al. 2020),
+# smoothed over WALK_TAU_S so its bursts become walking bouts. Below
+# P9_REST_HZ the fly stands; P9_REST_HZ + P9_RANGE_HZ is full speed.
+WALK_TAU_S = 0.8
+P9_REST_HZ = 0.5
+P9_RANGE_HZ = 1.0
+# MDN ("moonwalker", Bidaye et al. 2014) drives backward walking.
+MDN_FULL_HZ = 20.0
+# Ongoing visual activity keeps the giant fiber at ~10 Hz, occasionally 40;
+# a real looming object drives it to 150-250 Hz.
+GIANT_FIBER_HZ = 60.0
 ESCAPE_COOLDOWN_S = 1.5
 FEED_ON_HZ, FEED_OFF_HZ = 20.0, 10.0
 GROOM_ON_HZ, GROOM_OFF_HZ = 25.0, 12.0
@@ -178,7 +189,6 @@ class Fly:
             output_dof_order=flygym_fly.get_actuated_jointdofs_order(ActuatorType.POSITION),
             seed=index,
         )
-        self.walking = False
         self.reset()
 
     def reset(self):
@@ -190,14 +200,15 @@ class Fly:
         # turns, negative values walk backwards on that side.
         self.descending = np.zeros(2)
         self.behavior = {
-            "feeding": False, "grooming": False, "escaping": False, "flying": False,
-            "seeking_odor": False, "turn": 0.0,
+            "walking": False, "feeding": False, "grooming": False, "escaping": False,
+            "flying": False, "turn": 0.0, "walk": 0.0,
         }
         self.drive: dict[str, float] = {}
         self.proboscis = 0.0  # extension 0..1 (visual)
         self._last_escape = -np.inf
         self._last_loom = -np.inf
-        self._odor_turn = 0.0
+        self._p9 = 0.0  # smoothed DNp09 rate
+        self._turn = 0.0  # smoothed steering signal
         self._groom_phase = 0.0
         self._theta_prev: dict = {}
         self.flight: Flight | None = None
@@ -358,34 +369,12 @@ class Fly:
             sides = {"l": ["left"], "r": ["right"]}.get(part[:1], ["left", "right"])
             for side in sides:
                 add(f"{group}_{side}", TOUCH_HZ)
-        drive = {k: v for k, v in drive.items() if v > 0.5}
+        # Whole-Hz rates: sub-Hz jitter (e.g. odor as the fly shifts) would
+        # otherwise reconfigure the brain's input every chunk for nothing.
+        drive = {k: float(round(v)) for k, v in drive.items() if v > 0.5}
         if any(k.startswith("looming") for k in drive):
             self._last_loom = self.data.time
         return drive
-
-    def odor_reflex(self):
-        """Scripted olfactory search (not from the brain model): walk up the odor
-        gradient until close to the source."""
-        b = self.behavior
-        sources = [i for i in self.world.items if i.kind in ODOR_STRENGTH]
-        head, tip = self.head(), self.proboscis_tip()
-        conc, grad = odor_at(head, sources) if sources else (0.0, np.zeros(2))
-        # Food: keep going until the proboscis is on the drop (taste then stops
-        # the fly through the brain). Pure odor sources: stop close by.
-        near = any(
-            np.hypot(*(tip[:2] - s.pos[:2])) < DROP_RADIUS * 0.5 if s.kind == "sugar"
-            else np.hypot(*(head[:2] - s.pos[:2])) < ODOR_ARRIVED_MM
-            for s in sources
-        )
-        b["seeking_odor"] = conc > ODOR_DETECT and not near
-        if b["seeking_odor"] and np.linalg.norm(grad) > 1e-9:
-            fwd = self.frame()[:2, 0]
-            g = grad / np.linalg.norm(grad)
-            cross = fwd[0] * g[1] - fwd[1] * g[0]  # >0: source to the left
-            steer = cross if fwd @ g > 0 else (np.sign(cross) or 1.0)
-            self._odor_turn = float(np.clip(ODOR_TURN_GAIN * steer, -1, 1))
-        else:
-            self._odor_turn = 0.0
 
     # ------------------------------------------------------------ brain -> behavior
 
@@ -393,9 +382,18 @@ class Fly:
         b = self.behavior
         t = self.data.time
 
+        dt = SENSE_EVERY * TIMESTEP
+
         left = rates["dna02_left"] + 0.5 * rates["dna01_left"]
         right = rates["dna02_right"] + 0.5 * rates["dna01_right"]
         brain_turn = float(np.clip((left - right) / TURN_NORM_HZ, -1.0, 1.0))
+        self._turn += (1 - np.exp(-dt / TURN_TAU_S)) * (brain_turn - self._turn)
+
+        p9 = 0.5 * (rates["dnp09_left"] + rates["dnp09_right"])
+        self._p9 += (1 - np.exp(-dt / WALK_TAU_S)) * (p9 - self._p9)
+        forward = np.clip((self._p9 - P9_REST_HZ) / P9_RANGE_HZ, 0.0, 1.0)
+        backward = np.clip(rates["mdn"] / MDN_FULL_HZ, 0.0, 1.0)
+        b["walk"] = float(forward - backward)
 
         if rates["proboscis"] > FEED_ON_HZ:
             b["feeding"] = True
@@ -412,10 +410,15 @@ class Fly:
             self._escape()
         b["escaping"] = t - self._last_escape < 0.5
 
-        b["turn"] = brain_turn if t - self._last_loom < LOOM_STEER_WINDOW_S else self._odor_turn
-        # A feeding or grooming fly stays put: no steering.
+        if t - self._last_loom < LOOM_STEER_WINDOW_S:
+            b["turn"] = brain_turn
+        else:
+            b["turn"] = self._turn * min(1.0, abs(b["walk"]))
+        # A feeding or grooming fly stays put.
         if b["feeding"] or b["grooming"]:
             b["turn"] = 0.0
+            b["walk"] = 0.0
+        b["walking"] = abs(b["walk"]) > 0.15 and self.flight is None
 
     def _escape(self):
         """Giant-fiber escape: take off away from the nearest looming object."""
@@ -437,9 +440,7 @@ class Fly:
     def control(self):
         """Joint targets and adhesion (every CONTROL_EVERY physics steps)."""
         b = self.behavior
-        busy = b["feeding"] or b["grooming"] or self.flight is not None
-        wants_to_walk = self.walking or b["seeking_odor"]
-        walk = 1.0 if wants_to_walk and not busy else 0.0
+        walk = 0.0 if self.flight is not None else b["walk"]
         turn = 0.0 if self.flight is not None else b["turn"]
         target = np.array([walk - TURN_GAIN * turn, walk + TURN_GAIN * turn])
         # Ease the drive in/out so starting and stopping look natural.

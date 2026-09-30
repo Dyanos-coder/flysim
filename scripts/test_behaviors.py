@@ -22,7 +22,7 @@ def run(w: World, seconds: float, every: float = 0.25, label: str = ""):
             parts = []
             for f in w.flies:
                 r, b, p = f.brain.rates, f.behavior, f.position
-                flags = " ".join(k for k in ("seeking_odor", "feeding", "grooming", "escaping", "flying") if b[k])
+                flags = " ".join(k for k in ("walking", "feeding", "grooming", "escaping", "flying") if b[k])
                 parts.append(f"{f.name} ({p[0]:5.1f},{p[1]:5.1f},{p[2]:4.1f}) GF {max(r['giant_fiber_left'], r['giant_fiber_right']):3.0f} "
                              f"prob {r['proboscis']:3.0f} groom {r['grooming']:3.0f} [{flags}]")
             items = ", ".join(f"{i.kind}:{i.amount:.2f}" for i in w.items)

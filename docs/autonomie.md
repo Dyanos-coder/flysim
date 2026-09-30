@@ -79,6 +79,23 @@ produit pas le comportement, on le saura avant de construire quoi que ce soit.
   sur ta carte graphique (voir « Matériel »).
 - **Taille** : moyenne.
 
+**Résultat (fait, `scripts/spontaneous.py`)** :
+- Le bruit synaptique seul ne fait jamais tirer aucun neurone, et une lumière
+  uniforme sur les photorécepteurs ne propage rien. Ce sont des neurones
+  inhibiteurs (histamine), et ce modèle à impulsions ne sait pas calculer la
+  vision à partir d'eux.
+- DNp09 reçoit surtout ses entrées de LC9, LC31 et LCe04, des détecteurs
+  d'objets en mouvement. Avec une activité de fond de 2 Hz sur les neurones de
+  projection visuelle et les autres capteurs (0,5 Hz pour le goût), DNp09 tire
+  par bouffées et DNa02/DNa01 oscillent des deux côtés. Fibre géante, trompe et
+  toilettage restent sous leurs seuils : aucun comportement fantôme.
+- Branché sur la marche (DNp09 lissé sur 0,8 s), la mouche marche environ 58 %
+  du temps en épisodes de quelques secondes, s'arrête, repart et change de
+  direction, sans aucune commande. Le bouton « Marcher » et la recherche d'odeur
+  scriptée ont été retirés.
+- Coût : environ 1 s de calcul par seconde simulée et par cerveau. Une mouche
+  autonome tourne quasiment en temps réel ; plusieurs mouches ralentissent.
+
 ### Palier 2 : de vrais yeux → la vision passe par les 77 000 neurones optiques
 
 - **Quoi** : FlyGym sait rendre ce que voit chaque œil à facettes
