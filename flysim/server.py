@@ -22,7 +22,7 @@ from flysim.brain_gpu import GpuBrainLink
 from flysim.brain_link import BrainLink, BrainModel
 from flysim.export import frame_bytes, scene_description, spikes_bytes, visible_geoms
 from flysim.fly import Fly
-from flysim.perf import disable_windows_power_throttling
+from flysim.perf import disable_windows_power_throttling, tune_gil_switching
 from flysim.world import CHUNK_S, MAX_FLIES, World
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -252,6 +252,7 @@ def _parse_args():
 
 
 disable_windows_power_throttling()
+tune_gil_switching()
 _args = _parse_args()
 sim = Simulation(n_flies=int(np.clip(_args.flies, 1, MAX_FLIES)), with_brain=not _args.no_brain,
                  gpu=not _args.cpu_brain)

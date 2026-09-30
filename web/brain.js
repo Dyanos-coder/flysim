@@ -37,14 +37,18 @@ const DECAY_S = 0.25;
 
 const VERTEX = /* glsl */ `
   attribute vec3 color;
-  attribute float activity;
+  attribute float spikeTime;
   uniform float uScale;
+  uniform float uTime;
+  uniform float uDecay;
   varying vec3 vColor;
   varying float vAlpha;
   void main() {
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * mv;
-    float a = activity;
+    // Glow decays from the neuron's last spike, computed here on the GPU so
+    // the page doesn't touch 139k values every frame.
+    float a = exp(-max(uTime - spikeTime, 0.0) / uDecay);
     gl_PointSize = uScale * (1.0 + 2.6 * a) / -mv.z;
     vColor = mix(color * 0.55, vec3(1.0) * 0.55 + color * 0.9, a);
     vAlpha = 0.16 + 0.84 * a;
@@ -118,19 +122,24 @@ export class BrainView {
       const c = palette[classes[i]] ?? unknown;
       colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
     }
-    this.activity = new Float32Array(n);
+    // Time (s) of each neuron's last spike; far in the past = dark.
+    this.spikeTime = new Float32Array(n).fill(-1e6);
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    this.activityAttr = new THREE.BufferAttribute(this.activity, 1);
-    this.activityAttr.setUsage(THREE.DynamicDrawUsage);
-    geo.setAttribute("activity", this.activityAttr);
+    this.spikeAttr = new THREE.BufferAttribute(this.spikeTime, 1);
+    this.spikeAttr.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute("spikeTime", this.spikeAttr);
 
     this.material = new THREE.ShaderMaterial({
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
-      uniforms: { uScale: { value: 5.5 * this.container.clientHeight } },
+      uniforms: {
+        uScale: { value: 5.5 * this.container.clientHeight },
+        uTime: { value: 0 },
+        uDecay: { value: DECAY_S },
+      },
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       transparent: true,
@@ -188,28 +197,29 @@ export class BrainView {
   /** Forget the current glow (e.g. when another fly's brain is shown). */
   clearActivity() {
     if (!this.ready) return;
-    this.activity.fill(0);
-    this.activityAttr.needsUpdate = true;
+    this.spikeTime.fill(-1e6);
+    this.spikeAttr.needsUpdate = true;
   }
 
   /** Indices of neurons that just spiked. */
   spikes(indices) {
     if (!this.ready) return;
-    const a = this.activity;
-    for (let k = 0; k < indices.length; k++) a[indices[k]] = 1;
+    const t = performance.now() / 1000;
+    const st = this.spikeTime;
+    for (let k = 0; k < indices.length; k++) st[indices[k]] = t;
+    this.spikeAttr.needsUpdate = true; // uploaded once per message, not per frame
     this._spikeCount += indices.length;
   }
 
   render(dt) {
     if (!this.ready || !this.container.clientWidth) return;
-    const a = this.activity;
-    const f = Math.exp(-dt / DECAY_S);
-    for (let i = 0; i < a.length; i++) if (a[i] > 0.003) a[i] *= f; else a[i] = 0;
-    this.activityAttr.needsUpdate = true;
+    const t = performance.now() / 1000;
+    this.material.uniforms.uTime.value = t;
 
+    const st = this.spikeTime;
     for (const { el, idx } of this.labels) {
       let s = 0;
-      for (const i of idx) s += a[i];
+      for (const i of idx) s += Math.exp(-(t - st[i]) / DECAY_S);
       // With ongoing activity every group flickers a little; light a label
       // only on a real response.
       el.classList.toggle("lit", s / idx.length > 0.3);

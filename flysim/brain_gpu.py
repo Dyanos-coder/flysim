@@ -155,7 +155,7 @@ class GpuBrainEngine(threading.Thread):
         # Every GPU op of the engine goes through this stream (needed to record
         # a chunk as a CUDA graph and keep all ops ordered).
         self.stream = cp.cuda.Stream(non_blocking=True)
-        self._graph = None
+        self._graphs: dict[int, object] = {}  # brains in use -> recorded chunk
         self.seed = int(np.random.default_rng().integers(1, 2**31))
 
         # Neurons read out every chunk, gathered on the GPU in one go.
@@ -171,24 +171,50 @@ class GpuBrainEngine(threading.Thread):
         # Guards the GPU state: a chunk runs under it, and slot resets / rate
         # changes from other threads wait for the chunk to finish.
         self._lock = threading.RLock()
-        # Record the CUDA graph now, while no other thread touches the GPU
-        # (stream capture fails or hangs if another thread enqueues work).
-        self.run_chunk()
+        # Brains in use always occupy slots 0..n_used-1 (removing one moves the
+        # last into its place), so a chunk only computes those.
+        self.n_used = 0
+        # Record a chunk graph per number of brains now, while no other thread
+        # touches the GPU (stream capture fails or hangs if another thread
+        # enqueues work meanwhile).
+        if self.steps_per_chunk % self.n_slots == 0:
+            for k in range(1, capacity + 1):
+                try:
+                    with self.stream:
+                        self.stream.begin_capture()
+                        self._launch_chunk(k)
+                        self._graphs[k] = self.stream.end_capture()
+                except Exception:
+                    self._graphs.clear()  # capture unsupported: launch kernels directly
+                    break
         self._clear_all()
 
     # ------------------------------------------------------------ slots
 
     def attach(self, link: GpuBrainLink) -> int:
         with self._lock:
-            slot = self.links.index(None)
+            if self.n_used >= self.capacity:
+                raise RuntimeError("no free brain slot on the GPU engine")
+            slot = self.n_used
             self.links[slot] = link
             self._clear(slot)
+            self.n_used += 1
             return slot
 
     def detach(self, slot: int):
-        with self._lock:
-            self.links[slot] = None
-            self._clear(slot)
+        """Free a slot, moving the last brain in use into it."""
+        with self._lock, self.stream:
+            last = self.n_used - 1
+            if slot != last:
+                for a in (self.u, self.x, self.refractory, self.ref_steps, self.stim_prob,
+                          self.counts, self.ring_idx, self.ring_len):
+                    a[slot] = a[last]
+                moved = self.links[last]
+                self.links[slot] = moved
+                moved.slot = slot
+            self.links[last] = None
+            self._clear(last)
+            self.n_used = last
 
     def _clear(self, slot: int):
         with self._lock, self.stream:
@@ -215,9 +241,10 @@ class GpuBrainEngine(threading.Thread):
 
     # ------------------------------------------------------------ stepping
 
-    def _launch_chunk(self):
-        """Queue one chunk's kernels on the engine stream (starts at head 0)."""
-        n, S = self.n, self.capacity
+    def _launch_chunk(self, S: int):
+        """Queue one chunk's kernels for brains 0..S-1 on the engine stream
+        (starts at ring head 0)."""
+        n = self.n
         threads = 256
         int_blocks = (n * S + threads - 1) // threads
         p = self.params
@@ -243,23 +270,17 @@ class GpuBrainEngine(threading.Thread):
             head = (head + 1) % self.n_slots
 
     def run_chunk(self):
-        """Advance every brain one chunk. The chunk's 40-odd kernels are recorded
-        once as a CUDA graph and replayed with a single launch, which keeps the
-        CPU (busy with physics) out of the way. A chunk is a whole number of
-        ring cycles, so each chunk starts at ring head 0."""
+        """Advance every brain in use one chunk. The chunk's 40-odd kernels are
+        recorded once as a CUDA graph and replayed with a single launch, which
+        keeps the CPU (busy with physics) out of the way. A chunk is a whole
+        number of ring cycles, so each chunk starts at ring head 0."""
+        k = self.n_used
         with self.stream:
             self.step_dev.fill(self.step)
-            if self._graph is None and self.steps_per_chunk % self.n_slots == 0:
-                try:
-                    self.stream.begin_capture()
-                    self._launch_chunk()
-                    self._graph = self.stream.end_capture()
-                except Exception:
-                    self._graph = False  # capture unsupported: launch kernels directly
-            if self._graph:
-                self._graph.launch(self.stream)
-            else:
-                self._launch_chunk()
+            if k and k in self._graphs:
+                self._graphs[k].launch(self.stream)
+            elif k:
+                self._launch_chunk(k)
             self.step += self.steps_per_chunk
             # Wait for the GPU by sleeping: a blocking copy would spin a whole
             # CPU core meanwhile, stealing it from the flies' physics.
@@ -268,10 +289,10 @@ class GpuBrainEngine(threading.Thread):
                 time.sleep(0.0005)
             # Readouts for every brain; which neurons spiked (for the brain
             # map) only for watched brains: each list costs a GPU round trip.
-            readout = self.counts[:, self._readout_idx].get()
-            n_spiking = (self.counts > 0).sum(axis=1).get()
-            spiking = [None] * self.capacity
-            for s, link in enumerate(self.links):
+            readout = self.counts[:k][:, self._readout_idx].get()
+            n_spiking = (self.counts[:k] > 0).sum(axis=1).get()
+            spiking = [None] * k
+            for s, link in enumerate(self.links[:k]):
                 if link is not None and link.watched:
                     spiking[s] = self.cp.flatnonzero(self.counts[s]).get().astype(np.uint32)
         return readout, n_spiking, spiking
@@ -289,17 +310,20 @@ class GpuBrainEngine(threading.Thread):
                 self._wake.wait(0.05)
                 self._wake.clear()
                 continue
-            for s, l in links:
-                l._apply_drive(s)
             t0 = time.perf_counter()
             with self._lock:
+                # Slots are read under the lock: removing a fly moves another
+                # brain to a different slot.
+                links = [l for l in self.links[: self.n_used] if l is not None]
+                for l in links:
+                    l._apply_drive(l.slot)
                 readout, n_spiking, spiking = self.run_chunk()
+                results = [(l, l.slot) for l in links]
             self.load += 0.05 * ((time.perf_counter() - t0) * 1000.0 / CHUNK_MS - self.load)
             self.brain_time_ms += CHUNK_MS
-            for s, l in links:
-                if self.links[s] is l:
-                    rows = np.split(readout[s], self._readout_split)
-                    l._consume(rows, int(n_spiking[s]), spiking[s])
+            for l, s in results:
+                rows = np.split(readout[s], self._readout_split)
+                l._consume(rows, int(n_spiking[s]), spiking[s])
 
 
 class GpuBrainLink:
