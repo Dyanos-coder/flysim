@@ -127,6 +127,7 @@ class BrainLink(threading.Thread):
         self.load = 0.0
         self._wake = threading.Event()
         self._reset_requested = False
+        self._stopped = False
         # (sequence number, indices of neurons that spiked) per chunk, for the
         # live brain map; each viewer keeps its own read position.
         self._spike_log: collections.deque = collections.deque(maxlen=200)
@@ -160,6 +161,11 @@ class BrainLink(threading.Thread):
         while self.target_time_ms - self.brain_time_ms > MAX_LAG_MS and self.is_alive():
             time.sleep(0.001)
 
+    def stop(self):
+        """End the brain thread (its fly was removed)."""
+        self._stopped = True
+        self._wake.set()
+
     def sync_clock(self, sim_time_s: float):
         """Join a world that has already been running (fresh brain state)."""
         self.brain_time_ms = self.target_time_ms = sim_time_s * 1000.0
@@ -187,7 +193,7 @@ class BrainLink(threading.Thread):
 
     def run(self):
         alpha = 1 - np.exp(-CHUNK_MS / RATE_TAU_MS)
-        while True:
+        while not self._stopped:
             if self._reset_requested:
                 self.brain.reset()
                 self.brain_time_ms = 0.0

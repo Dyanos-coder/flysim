@@ -97,6 +97,7 @@ class Simulation(threading.Thread):
             "type": "status",
             "selected": self.selected,
             "can_add_fly": not self.building and len(w.flies) < MAX_FLIES,
+            "can_remove_fly": not self.building and len(w.flies) > 1,
             "building": self.building,
             "walking": sel.walking,
             "behavior": sel.behavior,
@@ -136,6 +137,11 @@ class Simulation(threading.Thread):
             if not self.building and len(w.flies) < MAX_FLIES:
                 self.building = True
                 threading.Thread(target=self._build_fly, daemon=True).start()
+        elif kind == "remove_fly":
+            if not self.building and len(w.flies) > 1:
+                w.remove_fly(sel)
+                self._rebuild_parts()
+                self.selected = min(self.selected, len(w.flies) - 1)
         elif kind == "_insert_fly" and isinstance(msg.get("fly"), Fly):  # from _build_fly only
             w.insert_fly(msg["fly"])
             self._rebuild_parts()

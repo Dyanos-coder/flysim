@@ -7,7 +7,7 @@
 //       1 = pose:   float32 [time, realtime_factor, n_projectiles, n_geoms,
 //                   n_geoms * 12 (xpos[3] + xmat[9]), n_projectiles * 4 (x, y, z, r)]
 //       2 = spikes: uint32 indices of neurons that spiked since the last message
-//   client -> server, JSON  {type: "select" | "add_fly" | "push" | "walk" | "reset" | "item" |
+//   client -> server, JSON  {type: "select" | "add_fly" | "remove_fly" | "push" | "walk" | "reset" | "item" |
 //                            "clear_items" | "threat" | "throw" | "take_off", ...}
 
 import * as THREE from "three";
@@ -332,8 +332,8 @@ const BEHAVIOR_LABELS = {
   feeding: "🍬 mange",
   grooming: "🧹 se nettoie",
   escaping: "💨 fuite (fibre géante)",
-  flying: "🪽 vole (scripté)",
-  seeking_odor: "👃 suit une odeur (scripté)",
+  flying: "🪽 vole",
+  seeking_odor: "👃 suit une odeur",
 };
 
 function senseLabel(group) {
@@ -383,6 +383,7 @@ function renderFlyList(flies) {
 
 function applyStatus(st) {
   syncItems(st.items || []);
+  $("btn-remove-fly").disabled = !st.can_remove_fly;
   const add = $("btn-add-fly");
   add.disabled = !st.can_add_fly;
   add.textContent = st.building ? "⏳ Naissance…" : st.flies && st.flies.length >= maxFlies
@@ -519,6 +520,10 @@ $("btn-follow").addEventListener("click", () => {
 });
 $("btn-reset").addEventListener("click", () => send({ type: "reset" }));
 $("btn-threat").addEventListener("click", () => send({ type: "threat" }));
+$("btn-remove-fly").addEventListener("click", () => {
+  $("btn-remove-fly").disabled = true;
+  send({ type: "remove_fly" });
+});
 $("btn-add-fly").addEventListener("click", () => {
   $("btn-add-fly").disabled = true;
   send({ type: "add_fly" });

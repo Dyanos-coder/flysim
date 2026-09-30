@@ -48,7 +48,7 @@
       <p class="hint" id="tool-hint">Glisser pour tourner, molette pour zoomer.</p>
       <div class="tools">
         <button id="btn-threat" title="Une grosse boule fonce sur la mouche">⚠️ Menace</button>
-        <button id="btn-fly" title="La faire s'envoler (vol scripté)">🪽 Envol</button>
+        <button id="btn-fly" title="La faire s'envoler">🪽 Envol</button>
         <button id="btn-clear" title="Retirer gouttes et odeurs">🧹 Vider</button>
       </div>
     </section>
@@ -58,6 +58,7 @@
       <div class="tools" id="fly-list"></div>
       <div class="tools">
         <button id="btn-add-fly" title="Une nouvelle mouche, avec son propre corps et son propre cerveau">➕ Ajouter une mouche</button>
+        <button id="btn-remove-fly" title="Retirer la mouche sélectionnée">➖ Retirer</button>
       </div>
       <div class="tools">
         <button id="btn-walk" title="Envie de marcher (le modèle de cerveau n'a pas d'activité spontanée)">🚶 Marcher</button>
@@ -71,11 +72,21 @@
     <section id="brain-section" hidden>
       <h2>Neurones clés <span class="muted" id="brain-meta"></span></h2>
       <div id="neurons"></div>
-      <p class="hint">
-        <b>Cerveau</b> : goût → manger, menace → fibre géante → fuite, toucher → toilettage.
-        <b>Scripté</b> (hors connectome) : mouvements du vol et du toilettage, recherche d'odeur.
-      </p>
     </section>
+
+    <details class="about">
+      <summary>ℹ️ Comment ça marche</summary>
+      <p>Chaque mouche a un corps physique (scan micro-CT, moteur MuJoCo) et son propre
+        cerveau : les 138 639 neurones et 15 millions de connexions du connectome FlyWire,
+        simulés avec le modèle de Shiu et al. (<i>Nature</i> 2024).</p>
+      <p><b>Décidé par le cerveau</b> : goût sucré → motoneurones de la trompe (manger),
+        amer → refus, objet qui fonce → LPLC2 → fibre géante (fuite) et virage à l'opposé,
+        contact → neurones du toilettage.</p>
+      <p><b>Animé par le programme</b> : le cerveau modélisé s'arrête au cou, sans la moelle
+        qui coordonne les pattes. Les gestes du vol et du toilettage sont donc animés, le vol
+        n'a pas d'aérodynamique, et la recherche d'odeur ainsi que l'envie de marcher ne
+        viennent pas du connectome.</p>
+    </details>
 
     <section class="stats">
       <div><span>Connexion</span><b id="st-conn">…</b></div>

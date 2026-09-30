@@ -71,6 +71,7 @@ class World:
                 yaw = angle + np.pi / 2 + rng.uniform(-0.6, 0.6)
             self.flies.append(Fly(self, i, f"fly{i}", pos, yaw, brains[i]))
         self._pool = ThreadPoolExecutor(max_workers=MAX_FLIES, thread_name_prefix="fly-physics")
+        self._fly_names = itertools.count(n_flies)
         self._spawn_rng = np.random.default_rng(7)
 
     def build_fly(self, brain=None) -> Fly:
@@ -78,6 +79,7 @@ class World:
         Building (MuJoCo model compile + warmup) takes ~1 s, so callers may do it
         off the simulation thread and `insert_fly` it afterwards."""
         index = len(self.flies)
+        name = f"fly{next(self._fly_names)}"  # unique even after removals
         others = [f.position[:2].copy() for f in self.flies]
         for _ in range(50):
             r = self._spawn_rng.uniform(3.0, 10.0)
@@ -86,7 +88,7 @@ class World:
             if all(np.linalg.norm(xy - o) > 4.0 for o in others):
                 break
         yaw = self._spawn_rng.uniform(-np.pi, np.pi)
-        fly = Fly(self, index, f"fly{index}", (xy[0], xy[1], 0.8), yaw, brain)
+        fly = Fly(self, index, name, (xy[0], xy[1], 0.8), yaw, brain)
         # Start at the world's current time so every fly shares one clock.
         fly.data.time = self.time
         fly._snapshot()
@@ -96,6 +98,18 @@ class World:
 
     def insert_fly(self, fly: Fly):
         self.flies.append(fly)
+
+    def remove_fly(self, fly: Fly):
+        """Take a fly out of the world (at least one stays)."""
+        if len(self.flies) <= 1 or fly not in self.flies:
+            return
+        self.flies.remove(fly)
+        for i, f in enumerate(self.flies):
+            f.index = i
+        for other in self.flies:  # forget how big it looked to the others
+            other._theta_prev = {k: v for k, v in other._theta_prev.items() if k[0] != fly.name}
+        if fly.brain is not None:
+            fly.brain.stop()
 
     @property
     def time(self) -> float:
