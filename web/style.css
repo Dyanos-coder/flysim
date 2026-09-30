@@ -133,3 +133,6 @@ body.brain-open { --brain-w: min(46vw, 820px); }
   body.brain-open #brainview { width: 100%; top: auto; height: 45vh; }
   body.brain-open #viewport { bottom: 45vh; }
 }
+
+button:disabled { opacity: 0.45; cursor: default; }
+button:disabled:hover { background: rgba(255, 255, 255, 0.05); }

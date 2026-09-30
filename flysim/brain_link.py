@@ -160,6 +160,10 @@ class BrainLink(threading.Thread):
         while self.target_time_ms - self.brain_time_ms > MAX_LAG_MS and self.is_alive():
             time.sleep(0.001)
 
+    def sync_clock(self, sim_time_s: float):
+        """Join a world that has already been running (fresh brain state)."""
+        self.brain_time_ms = self.target_time_ms = sim_time_s * 1000.0
+
     def reset(self):
         self._reset_requested = True
         self.target_time_ms = 0.0

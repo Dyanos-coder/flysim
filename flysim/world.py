@@ -19,6 +19,7 @@ import numpy as np
 from flysim.fly import FEED_SECONDS, SENSE_EVERY, TIMESTEP, Fly
 
 SPAWN_RADIUS = 7.0  # mm, flies start on a circle around the origin
+MAX_FLIES = 6  # each fly costs one physics thread and one brain thread
 CHUNK_S = SENSE_EVERY * TIMESTEP
 
 # --- balls
@@ -69,7 +70,32 @@ class World:
                 pos = (SPAWN_RADIUS * np.cos(angle), SPAWN_RADIUS * np.sin(angle), 0.8)
                 yaw = angle + np.pi / 2 + rng.uniform(-0.6, 0.6)
             self.flies.append(Fly(self, i, f"fly{i}", pos, yaw, brains[i]))
-        self._pool = ThreadPoolExecutor(max_workers=n_flies, thread_name_prefix="fly-physics")
+        self._pool = ThreadPoolExecutor(max_workers=MAX_FLIES, thread_name_prefix="fly-physics")
+        self._spawn_rng = np.random.default_rng(7)
+
+    def build_fly(self, brain=None) -> Fly:
+        """A new fly near the middle, clear of the others, not yet in the world.
+        Building (MuJoCo model compile + warmup) takes ~1 s, so callers may do it
+        off the simulation thread and `insert_fly` it afterwards."""
+        index = len(self.flies)
+        others = [f.position[:2].copy() for f in self.flies]
+        for _ in range(50):
+            r = self._spawn_rng.uniform(3.0, 10.0)
+            a = self._spawn_rng.uniform(0, 2 * np.pi)
+            xy = np.array([r * np.cos(a), r * np.sin(a)])
+            if all(np.linalg.norm(xy - o) > 4.0 for o in others):
+                break
+        yaw = self._spawn_rng.uniform(-np.pi, np.pi)
+        fly = Fly(self, index, f"fly{index}", (xy[0], xy[1], 0.8), yaw, brain)
+        # Start at the world's current time so every fly shares one clock.
+        fly.data.time = self.time
+        fly._snapshot()
+        if brain is not None:
+            brain.sync_clock(self.time)
+        return fly
+
+    def insert_fly(self, fly: Fly):
+        self.flies.append(fly)
 
     @property
     def time(self) -> float:

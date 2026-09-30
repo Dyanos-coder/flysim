@@ -4,10 +4,10 @@
 //   server -> client, JSON  {type: "init", geoms: [...], meshes: {...}, ...}
 //   server -> client, JSON  {type: "status", behavior, brain: {rates, ...}, items} at ~5 Hz
 //   server -> client, binary, starting with a uint32 tag:
-//       1 = pose:   float32 [time, realtime_factor, n_projectiles,
+//       1 = pose:   float32 [time, realtime_factor, n_projectiles, n_geoms,
 //                   n_geoms * 12 (xpos[3] + xmat[9]), n_projectiles * 4 (x, y, z, r)]
 //       2 = spikes: uint32 indices of neurons that spiked since the last message
-//   client -> server, JSON  {type: "select" | "push" | "walk" | "reset" | "item" |
+//   client -> server, JSON  {type: "select" | "add_fly" | "push" | "walk" | "reset" | "item" |
 //                            "clear_items" | "threat" | "throw" | "take_off", ...}
 
 import * as THREE from "three";
@@ -154,6 +154,7 @@ let geomObjects = [];
 let flyRootGeom = -1; // thorax geom of the selected fly, followed by the camera
 let followGeoms = []; // thorax geom of every fly
 let selectedFly = 0;
+let maxFlies = 6;
 const geomToBody = new Map();
 
 function buildScene(init) {
@@ -194,11 +195,12 @@ function buildScene(init) {
   });
 
   followGeoms = init.follow_geoms || [];
+  maxFlies = init.max_flies || maxFlies;
   setSelected(init.selected ?? 0);
 }
 
 const tmpMatrix = new THREE.Matrix4();
-const FRAME_HEADER = 3;
+const FRAME_HEADER = 4;
 
 // ---------------------------------------------------------------- world items
 
@@ -381,6 +383,10 @@ function renderFlyList(flies) {
 
 function applyStatus(st) {
   syncItems(st.items || []);
+  const add = $("btn-add-fly");
+  add.disabled = !st.can_add_fly;
+  add.textContent = st.building ? "⏳ Naissance…" : st.flies && st.flies.length >= maxFlies
+    ? `➕ Maximum (${maxFlies})` : "➕ Ajouter une mouche";
   if (st.selected !== undefined && st.selected !== selectedFly) setSelected(st.selected);
   if (st.flies) renderFlyList(st.flies);
   setWalking(st.walking);
@@ -416,6 +422,8 @@ function applyStatus(st) {
 
 function applyFrame(buf) {
   const f = new Float32Array(buf, 4);
+  // Frames from a scene we haven't (re)loaded yet, right after a fly is added.
+  if (f[3] !== geomObjects.length) return;
   $("st-time").textContent = f[0].toFixed(2) + " s";
   $("st-rtf").textContent = "×" + f[1].toFixed(2);
 
@@ -458,7 +466,7 @@ function connect() {
         buildScene(msg);
         setWalking(msg.walking);
         if (msg.has_brain) {
-          buildNeuronPanel();
+          if (!$("neurons").children.length) buildNeuronPanel();
           if (!brainLoading) setBrainOpen(true);
         }
       } else if (msg.type === "status") {
@@ -511,6 +519,10 @@ $("btn-follow").addEventListener("click", () => {
 });
 $("btn-reset").addEventListener("click", () => send({ type: "reset" }));
 $("btn-threat").addEventListener("click", () => send({ type: "threat" }));
+$("btn-add-fly").addEventListener("click", () => {
+  $("btn-add-fly").disabled = true;
+  send({ type: "add_fly" });
+});
 $("btn-fly").addEventListener("click", () => send({ type: "take_off" }));
 $("btn-clear").addEventListener("click", () => send({ type: "clear_items" }));
 

@@ -13,7 +13,7 @@ import numpy as np
 # Binary WebSocket messages start with a uint32 tag.
 TAG_POSE = 1
 TAG_SPIKES = 2
-FRAME_HEADER = 3  # time, rtf, number of projectiles
+FRAME_HEADER = 4  # time, rtf, number of projectiles, number of geoms
 
 
 def _b64(arr: np.ndarray) -> str:
@@ -92,8 +92,10 @@ def frame_bytes(
                     xmat[row] = m.reshape(9)
         poses.append(np.concatenate([xpos, xmat], axis=1))
     projectiles = projectiles or []
-    header = np.array([time, rtf, len(projectiles)], dtype=np.float32)
     pose = np.concatenate(poses).astype(np.float32)
+    # The geom count lets a client skip frames from a scene it hasn't loaded yet
+    # (right after a fly is added).
+    header = np.array([time, rtf, len(projectiles), len(pose)], dtype=np.float32)
     proj = np.array(projectiles, dtype=np.float32).reshape(-1, 4)
     return np.uint32(TAG_POSE).tobytes() + header.tobytes() + pose.tobytes() + proj.tobytes()
 

@@ -1,6 +1,8 @@
 """FlySim server: runs the world in a background thread and streams it to browsers.
 
 Run with:  uv run python -m flysim.server  [--flies N] [--no-brain]
+
+Flies can also be added at runtime from the UI (up to world.MAX_FLIES).
 """
 
 import argparse
@@ -18,8 +20,9 @@ from fastapi.staticfiles import StaticFiles
 
 from flysim.brain_link import BrainLink, BrainModel
 from flysim.export import frame_bytes, scene_description, spikes_bytes, visible_geoms
+from flysim.fly import Fly
 from flysim.perf import disable_windows_power_throttling
-from flysim.world import CHUNK_S, World
+from flysim.world import CHUNK_S, MAX_FLIES, World
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 STREAM_HZ = 30
@@ -42,16 +45,34 @@ class Simulation(threading.Thread):
             for b in brains:
                 b.start()
         self.world = World(n_flies=n_flies, brains=brains)
-        # Scene parts: fly 0's model brings the ground, then every fly's body.
-        self.parts = []
-        for fly in self.world.flies:
-            ids = visible_geoms(fly.model, include_world=fly.index == 0)
-            self.parts.append((fly, ids))
+        self._rebuild_parts()
+        self.building = False  # a fly is being added in the background
         self.selected = 0
         self.commands: queue.Queue = queue.Queue()
         self.lock = threading.Lock()
         self.rtf = 0.0
         self.latest_frame = self._frame()
+
+    def _rebuild_parts(self):
+        """Scene parts: fly 0's model brings the ground, then every fly's body.
+        Bumping `scene_version` makes every client reload the scene."""
+        self.parts = [
+            (fly, visible_geoms(fly.model, include_world=fly.index == 0)) for fly in self.world.flies
+        ]
+        self.scene_version = getattr(self, "scene_version", 0) + 1
+
+    def _build_fly(self):
+        """Off the simulation thread: new brain + new fly physics (~1 s)."""
+        try:
+            brain = None
+            if self.brain_model is not None:
+                brain = BrainLink(self.brain_model, seed=len(self.world.flies))
+                brain.start()
+            fly = self.world.build_fly(brain)
+            self.commands.put({"type": "_insert_fly", "fly": fly})
+        except Exception:
+            self.building = False
+            raise
 
     @property
     def selected_fly(self):
@@ -66,7 +87,7 @@ class Simulation(threading.Thread):
             follow.append(offset + int(rows[0]) if len(rows) else -1)
             offset += len(ids)
         desc.update(type="init", follow_geoms=follow, selected=self.selected,
-                    has_brain=self.brain_model is not None)
+                    has_brain=self.brain_model is not None, max_flies=MAX_FLIES)
         return json.dumps(desc)
 
     def status_message(self) -> str:
@@ -75,6 +96,8 @@ class Simulation(threading.Thread):
         status = {
             "type": "status",
             "selected": self.selected,
+            "can_add_fly": not self.building and len(w.flies) < MAX_FLIES,
+            "building": self.building,
             "walking": sel.walking,
             "behavior": sel.behavior,
             "drive": sel.drive,
@@ -109,6 +132,15 @@ class Simulation(threading.Thread):
         sel = self.selected_fly
         if kind == "select":
             self.selected = int(np.clip(msg.get("fly", 0), 0, len(w.flies) - 1))
+        elif kind == "add_fly":
+            if not self.building and len(w.flies) < MAX_FLIES:
+                self.building = True
+                threading.Thread(target=self._build_fly, daemon=True).start()
+        elif kind == "_insert_fly" and isinstance(msg.get("fly"), Fly):  # from _build_fly only
+            w.insert_fly(msg["fly"])
+            self._rebuild_parts()
+            self.selected = len(w.flies) - 1
+            self.building = False
         elif kind == "walk":
             sel.walking = bool(msg.get("on"))
         elif kind == "reset":
@@ -173,7 +205,7 @@ class Simulation(threading.Thread):
 
 def _parse_args():
     parser = argparse.ArgumentParser(description="FlySim server")
-    parser.add_argument("--flies", type=int, default=3, help="number of flies (default 3)")
+    parser.add_argument("--flies", type=int, default=1, help="flies at start (default 1; more can be added from the UI)")
     parser.add_argument("--no-brain", action="store_true", help="physics only, no connectome")
     args, _ = parser.parse_known_args()
     return args
@@ -181,7 +213,7 @@ def _parse_args():
 
 disable_windows_power_throttling()
 _args = _parse_args()
-sim = Simulation(n_flies=max(1, _args.flies), with_brain=not _args.no_brain)
+sim = Simulation(n_flies=int(np.clip(_args.flies, 1, MAX_FLIES)), with_brain=not _args.no_brain)
 app = FastAPI()
 
 
@@ -189,6 +221,7 @@ app = FastAPI()
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
     await ws.send_text(sim.init_message())
+    scene_version = sim.scene_version
 
     async def receive():
         while True:
@@ -202,6 +235,9 @@ async def ws_endpoint(ws: WebSocket):
     watched, spike_seq = None, 0
     try:
         while not receiver.done():
+            if sim.scene_version != scene_version:
+                scene_version = sim.scene_version
+                await ws.send_text(sim.init_message())
             with sim.lock:
                 frame = sim.latest_frame
             await ws.send_bytes(frame)

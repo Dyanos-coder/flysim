@@ -42,6 +42,8 @@ per fly (MuJoCo releases the GIL) in 10 ms chunks; between chunks the world
 exchanges what flies share: food, balls, bumping, and vision -- a fly flying at
 another one looms on its LPLC2 neurons and can set off its escape, so one
 startled fly can scatter the group. Walking neighbors don't trigger escapes.
+The simulation starts with one fly; "Ajouter une mouche" adds more (up to 6)
+while it runs, each built in the background with its own body and brain.
 
 ## Model corrections (flysim/neurons.py)
 
@@ -60,7 +62,7 @@ dt = 0.1 ms, r = 0.998 with rates ~10% high at the dt = 0.5 ms used live.
 
 ```sh
 uv sync
-uv run python -m flysim.server            # --flies N (default 3), --no-brain for physics only
+uv run python -m flysim.server            # --flies N at start (default 1), --no-brain for physics only
 ```
 
 Then open http://localhost:8000. Data files go in `data/` (not versioned): from
