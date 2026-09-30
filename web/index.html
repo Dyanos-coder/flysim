@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlySim</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="viewport"></div>
+
+  <section id="brainview" hidden>
+    <header>
+      <div>
+        <h2>Cerveau en direct</h2>
+        <p class="sub">FlyWire v783 · <span id="brain-count">138 639</span> neurones · <span id="brain-rate">–</span></p>
+      </div>
+      <button id="btn-brain-hide" title="Masquer la carte">✕</button>
+    </header>
+    <div id="brain-canvas"></div>
+    <footer id="brain-legend"></footer>
+  </section>
+
+  <aside id="panel">
+    <h1>FlySim</h1>
+    <p class="sub">Drosophila melanogaster — corps physique + cerveau FlyWire</p>
+
+    <section>
+      <h2>Outils</h2>
+      <div class="tools">
+        <button data-tool="orbit" class="active" title="Tourner la caméra">🎥 Caméra</button>
+        <button data-tool="push" title="Cliquer-glisser sur la mouche pour la toucher / pousser">✋ Toucher</button>
+        <button data-tool="throw" title="Cliquer pour lancer une balle vers ce point">🎯 Lancer</button>
+      </div>
+      <div class="tools">
+        <button data-tool="sugar" title="Goutte de jus sucré (sent le fruit)">🍬 Sucre</button>
+        <button data-tool="bitter" title="Goutte amère (sans odeur)">🧪 Amer</button>
+        <button data-tool="vinegar" title="Source d'odeur de vinaigre">🍷 Vinaigre</button>
+      </div>
+      <p class="hint" id="tool-hint">Glisser pour tourner, molette pour zoomer.</p>
+      <div class="tools">
+        <button id="btn-threat" title="Une grosse boule fonce sur la mouche">⚠️ Menace</button>
+        <button id="btn-fly" title="La faire s'envoler (vol scripté)">🪽 Envol</button>
+        <button id="btn-clear" title="Retirer gouttes et odeurs">🧹 Vider</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Mouche</h2>
+      <div class="tools">
+        <button id="btn-walk" title="Envie de marcher (le modèle de cerveau n'a pas d'activité spontanée)">🚶 Marcher</button>
+        <button id="btn-follow" class="active" title="La caméra suit la mouche">🎯 Suivre</button>
+        <button id="btn-reset" title="Remettre la mouche au centre">↺ Reset</button>
+        <button id="btn-brain" title="Afficher la carte du cerveau">🧠 Carte</button>
+      </div>
+      <div id="behaviors"></div>
+    </section>
+
+    <section id="brain-section" hidden>
+      <h2>Neurones clés <span class="muted" id="brain-meta"></span></h2>
+      <div id="neurons"></div>
+      <p class="hint">
+        <b>Cerveau</b> : goût → manger, menace → fibre géante → fuite, toucher → toilettage.
+        <b>Scripté</b> (hors connectome) : mouvements du vol et du toilettage, recherche d'odeur.
+      </p>
+    </section>
+
+    <section class="stats">
+      <div><span>Connexion</span><b id="st-conn">…</b></div>
+      <div><span>Temps simulé</span><b id="st-time">0.00 s</b></div>
+      <div><span>Vitesse sim</span><b id="st-rtf">–</b></div>
+      <div><span>FPS</span><b id="st-fps">–</b></div>
+    </section>
+  </aside>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
