@@ -1,14 +1,16 @@
 [project]
 name = "flysim"
 version = "0.1.0"
-description = "Add your description here"
+description = "Mouches virtuelles pilotées par la carte complète de leur cerveau (connectome FlyWire)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "cuda-toolkit[cudart,nvrtc]==13.*",
-    "cupy-cuda13x>=14.2.0",
     "fastapi>=0.142.2",
     "flygym>=2.1.0",
     "pyarrow>=25.0.1",
     "uvicorn[standard]>=0.54.0",
+    # Brains on an NVIDIA GPU. Installed on 64-bit Windows/Linux only (where
+    # CuPy exists); without a usable NVIDIA GPU the server falls back to the CPU.
+    "cupy-cuda13x>=14.2.0; (sys_platform == 'win32' or sys_platform == 'linux') and (platform_machine == 'AMD64' or platform_machine == 'x86_64')",
+    "cuda-toolkit[cudart,nvrtc]==13.*; (sys_platform == 'win32' or sys_platform == 'linux') and (platform_machine == 'AMD64' or platform_machine == 'x86_64')",
 ]

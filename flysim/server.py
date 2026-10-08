@@ -11,6 +11,7 @@ import json
 import queue
 import threading
 import time
+import webbrowser
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,7 @@ import uvicorn
 from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
+from flysim import data
 from flysim.brain_gpu import GpuBrainLink
 from flysim.brain_link import BrainLink, BrainModel
 from flysim.export import frame_bytes, scene_description, spikes_bytes, visible_geoms
@@ -40,9 +42,10 @@ class Simulation(threading.Thread):
         self.gpu_engine = None
         brains = None
         if with_brain:
-            print("Loading the FlyWire brain (139k neurons, 15M connections)...")
+            data.ensure()  # first run: download the connectome (~135 MB)
+            print("Chargement du cerveau FlyWire (139 000 neurones, 15 millions de connexions)...")
             self.brain_model = BrainModel()
-            print(f"  ready in {self.brain_model.load_seconds:.0f} s")
+            print(f"  prêt en {self.brain_model.load_seconds:.0f} s")
             if gpu:
                 self.gpu_engine = _gpu_engine(self.brain_model)
             brains = [self._new_brain(seed=i) for i in range(n_flies)]
@@ -235,10 +238,10 @@ def _gpu_engine(model):
         from flysim.brain_gpu import GpuBrainEngine
 
         engine = GpuBrainEngine(model, capacity=MAX_FLIES)  # compiles kernels, records the graph
-        print("  brains on the GPU")
+        print("  cerveaux sur la carte graphique (GPU)")
         return engine
     except Exception as e:  # no CuPy, no NVIDIA GPU, driver issue...
-        print(f"  GPU unavailable ({type(e).__name__}: {e}); brains on the CPU")
+        print(f"  carte graphique indisponible ({type(e).__name__}) : cerveaux sur le processeur")
         return None
 
 
@@ -247,6 +250,8 @@ def _parse_args():
     parser.add_argument("--flies", type=int, default=1, help="flies at start (default 1; more can be added from the UI)")
     parser.add_argument("--no-brain", action="store_true", help="physics only, no connectome")
     parser.add_argument("--cpu-brain", action="store_true", help="run brains on the CPU even if a GPU is available")
+    parser.add_argument("--no-browser", action="store_true", help="don't open the page in a browser")
+    parser.add_argument("--port", type=int, default=8000)
     args, _ = parser.parse_known_args()
     return args
 
@@ -331,8 +336,12 @@ app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
 def main():
     sim.start()
-    print(f"FlySim ({len(sim.world.flies)} flies): http://localhost:8000")
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="warning")
+    url = f"http://localhost:{_args.port}"
+    print()
+    print(f"FlySim est lancé : {url}  (Ctrl+C pour arrêter)")
+    if not _args.no_browser:
+        threading.Timer(1.5, webbrowser.open, args=(url,)).start()
+    uvicorn.run(app, host="127.0.0.1", port=_args.port, log_level="warning")
 
 
 if __name__ == "__main__":
