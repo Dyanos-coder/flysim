@@ -258,6 +258,7 @@ def _parse_args():
 
 disable_windows_power_throttling()
 tune_gil_switching()
+data._safe_console()
 _args = _parse_args()
 sim = Simulation(n_flies=int(np.clip(_args.flies, 1, MAX_FLIES)), with_brain=not _args.no_brain,
                  gpu=not _args.cpu_brain)

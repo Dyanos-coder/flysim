@@ -49,11 +49,20 @@ def _download(url: str, dest: Path):
                 pct = f"{100 * done / total:3.0f} %" if total else ""
                 print(f"\r  {dest.name}: {done / 1e6:6.1f} / {total / 1e6:.1f} Mo {pct}", end="", flush=True)
     os.replace(part, dest)
-    print(f"\r  {dest.name}: {done / 1e6:.1f} Mo ✓" + " " * 20, flush=True)
+    print(f"\r  {dest.name}: {done / 1e6:.1f} Mo OK" + " " * 20, flush=True)
+
+
+def _safe_console():
+    """A Windows console in a legacy code page can't print every character;
+    never let a message crash the program."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
 
 
 def ensure(validation: bool = False) -> None:
     """Download whichever data files are missing."""
+    _safe_console()
     files = dict(BRAIN_FILES)
     if validation:
         files.update(VALIDATION_FILES)
